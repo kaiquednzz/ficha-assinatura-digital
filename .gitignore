@@ -1,0 +1,12 @@
+python/
+Coletas/
+Assinadas/
+Coleta.xlam
+__pycache__/
+~$*
+# arquivos gerados ao rodar a demo do exemplo
+exemplo/*/assinaturas/
+exemplo/*/url.txt
+exemplo/*/log.csv
+exemplo/*/stop.flag
+logo.svg
