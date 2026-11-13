@@ -34,8 +34,10 @@ sequenceDiagram
     C->>S: escaneia o QR, abre a ficha
     C->>S: assina em tela cheia, envia PNG recortado
     S->>S: salva assinaturas/<setor>.png e log.csv (hora, IP, desenho/digitado)
-    E->>E: Finalizar coleta: cola as assinaturas nas células, exporta o PDF assinado
-    E->>S: stop.flag encerra o servidor
+    C->>S: Finalizar (no celular) cria finalizar.flag
+    E->>E: a cada 3 s confere o flag (ou botão Finalizar coleta no Excel)
+    E->>E: cola as assinaturas nas células, exporta o PDF assinado
+    E->>S: pdf.txt + stop.flag: o celular mostra "PDF gerado" e o servidor encerra
 ```
 
 ## Destaques
@@ -46,6 +48,11 @@ sequenceDiagram
   a página mostra cada assinatura salva no lugar exato da ficha.
 - **Feito para o chão de fábrica:** botões grandes por setor, tela cheia com o celular deitado, traço suavizado,
   progresso de 7 segmentos, prévia só do bloco de responsáveis e visualizador com zoom.
+- **Finalizar pelo celular:** depois da última assinatura, o próprio celular pede o PDF. O Excel, aberto no PC,
+  gera o arquivo e o celular mostra o nome dele. Com setor faltando, o botão pede um segundo toque.
+- **Retomar depois de um imprevisto:** as assinaturas ficam salvas na pasta da coleta e o código do link também.
+  Clicar de novo em Iniciar coleta, horas depois, sobe o servidor com o mesmo link e o que já foi assinado; se o
+  servidor ainda estiver no ar, só reabre o QR.
 - **Plano B no PC:** a mesma página abre no navegador do PC; dá para desenhar com o mouse ou digitar o nome, que
   vira assinatura cursiva. O `log.csv` registra se foi desenhada ou digitada.
 - **Seguro o bastante para a rede interna:** código de 6 caracteres por coleta (sem letras ambíguas), validação
@@ -84,7 +91,7 @@ arquivo `exemplo/FX2041A/stop.flag` ou use Ctrl+C.
 4. Em cada PC: feche o Excel e rode `instalar.cmd`. Aparece a guia **Assinaturas**.
 5. A aba da ficha é encontrada pela constante `ABA` (padrão `FICHA*`); as células de assinatura ficam em `Slots()`.
 
-Uso: código da faca na célula `D2` > **Iniciar coleta** > gestores assinam > **Finalizar coleta**. O PDF vai para
+Uso: código da faca na célula `D2` > **Iniciar coleta** > gestores assinam > **Finalizar** (no celular ou no Excel). O PDF vai para
 `Assinadas\<faca>_assinada_<data>.pdf` e a coleta (com `log.csv`) é arquivada em `Coletas\`.
 
 ## Testes
@@ -93,8 +100,8 @@ Uso: código da faca na célula `D2` > **Iniciar coleta** > gestores assinam > *
 python test_server.py
 ```
 
-Cobre token, página do QR, setores fora da lista, PNG inválido, path traversal, log desenho/digitado e porta
-exclusiva. O fluxo completo (macro + servidor + PDF) foi validado pelo Excel via automação COM.
+Cobre token, página do QR, setores fora da lista, PNG inválido, path traversal, log desenho/digitado, porta
+exclusiva, retomada com o mesmo link e finalização pelo celular (incluindo erro e nova tentativa). O fluxo completo (macro + servidor + PDF) foi validado pelo Excel via automação COM.
 
 ## Limitações
 
@@ -102,6 +109,7 @@ exclusiva. O fluxo completo (macro + servidor + PDF) foi validado pelo Excel via
 - Assinatura desenhada é um controle interno, não assinatura com validade jurídica.
 - O QR code usa uma biblioteca do cdnjs; sem internet no PC, a página mostra só o link.
 - Iniciar coleta usa a área de transferência para gerar a imagem da ficha.
+- Finalizar pelo celular precisa do Excel aberto no PC com a planilha da ficha (o PDF é gerado por ele).
 
 ## Licença
 

@@ -52,8 +52,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 main{max-width:760px;margin:auto;display:grid;gap:22px;
  padding:16px max(16px,var(--sr)) calc(32px + var(--sb)) max(16px,var(--sl))}
 h2{font-size:15px;font-weight:600;color:var(--muted);margin:0 0 8px}
-.pronto{background:var(--okbg);color:var(--ok);border:1px solid var(--okline);border-radius:10px;padding:12px 14px;font-weight:600}
-.pronto span{display:block;font-weight:400;color:var(--ink);margin-top:2px}
+.fim{display:grid;gap:8px;margin-top:12px}.fim:empty{display:none}
+.box{border-radius:10px;padding:12px 14px;background:var(--card);border:1px solid var(--line)}
+.box b{display:block}.box span{display:block;font-size:14px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.box.ok{background:var(--okbg);border-color:var(--okline)}.box.ok b{color:var(--ok)}
+.box.warn{background:var(--warnbg);border-color:#f0b4b0}.box.warn b{color:var(--warn)}
+.fin{width:100%;min-height:52px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-weight:700}
+.fin.cheio{background:var(--ok);border-color:var(--ok);color:#fff}
+.slot:disabled{opacity:.55;cursor:default}
 
 .lista{display:grid;gap:8px}
 @media (min-width:620px){.lista{grid-template-columns:1fr 1fr}}
@@ -115,11 +121,10 @@ h2{font-size:15px;font-weight:600;color:var(--muted);margin:0 0 8px}
 </header>
 
 <main>
- <div class=pronto id=pronto hidden>Todas as assinaturas coletadas.
-  <span>No Excel: Assinaturas &gt; Finalizar coleta, para gerar o PDF assinado.</span></div>
  <section>
   <h2>Toque no setor para assinar</h2>
   <div class=lista id=lista></div>
+  <div class=fim id=fim aria-live=polite></div>
  </section>
  <section>
   <h2>Responsáveis na ficha</h2>
@@ -155,6 +160,7 @@ const $=id=>document.getElementById(id),cv=$('cv'),x=cv.getContext('2d');
 const SRC=window.SRC_DEMO||((k,v)=>`/sig/${k}.png?t=${T}&v=${v}`);
 const CHECK='<svg width=16 height=16 viewBox="0 0 16 16" aria-hidden=true><path d="M3 8.5l3.2 3L13 4.8" fill=none stroke="#fff" stroke-width=2.4 stroke-linecap=round stroke-linejoin=round /></svg>';
 let done=new Set(),cur=null,box=null,modo='desenho',on=false,pts=[];
+let fase='coletando',pdf='',erro='',pedido=0,confirmar=false;  // fases: coletando, finalizando, concluido, erro
 const nome=k=>SLOTS.find(s=>s[0]==k)[1];
 const aviso=t=>{$('msg').textContent=t;$('msg').hidden=!t};
 let tt;const toast=t=>{$('toast').textContent=t;$('toast').classList.add('on');clearTimeout(tt);tt=setTimeout(()=>$('toast').classList.remove('on'),2600)};
@@ -163,15 +169,44 @@ function render(){
  const n=done.size,tot=SLOTS.length;
  $('cont').textContent=n+' de '+tot;
  $('seg').innerHTML=SLOTS.map(([k])=>`<i class="${done.has(k)?'on':''}"></i>`).join('');
- $('pronto').hidden=n<tot;
+ const fechada=fase=='concluido'||fase=='finalizando';
  $('lista').innerHTML=SLOTS.map(([k,nm])=>{const ok=done.has(k);
-  return `<button class="slot${ok?' ok':''}" onclick="abrir('${k}')"><span class=mk>${CHECK}</span>
+  return `<button class="slot${ok?' ok':''}" onclick="abrir('${k}')"${fechada?' disabled':''}><span class=mk>${CHECK}</span>
    <span class=n>${nm}<span class=s>${ok?'Assinado, toque para refazer':'Aguardando assinatura'}</span></span></button>`}).join('');
  const v=Date.now(),sig=SLOTS.filter(s=>done.has(s[0])).map(([k,,l,t,w,h])=>
   `<img class=sig alt="" src="${SRC(k,v)}" style="left:${l*100}%;top:${t*100}%;width:${w*100}%;height:${h*100}%">`).join('');
  document.querySelectorAll('.sigs').forEach(e=>e.innerHTML=sig);
+ renderFim();
 }
-function status(){if(!cur)fetch('/status?t='+T).then(r=>r.json()).then(l=>{if(l.sort().join()!=[...done].sort().join()){done=new Set(l);render()}}).catch(()=>{})}
+function renderFim(){
+ const n=done.size,tot=SLOTS.length,el=$('fim');
+ if(fase=='concluido'){el.innerHTML=`<div class="box ok"><b>PDF gerado</b><span>${pdf}</span><span>Salvo na pasta Assinadas. Pode fechar esta página.</span></div>`;return}
+ if(fase=='finalizando'){
+  el.innerHTML=Date.now()-pedido>30000
+   ?`<div class="box warn"><b>O Excel não respondeu</b><span>Confira se a planilha está aberta no PC. Lá, use Assinaturas &gt; Finalizar coleta.</span></div>`
+   :`<div class=box><b>Gerando o PDF no PC…</b><span>Leva alguns segundos.</span></div>`;return}
+ const err=fase=='erro'?`<div class="box warn"><b>Não foi possível gerar o PDF</b><span>${erro}</span></div>`:'';
+ if(!n){el.innerHTML=err;return}
+ const tudo=n==tot;
+ el.innerHTML=err+(tudo?`<div class="box ok"><b>Todas as assinaturas coletadas</b></div>`:'')+
+  `<button class="fin${tudo||confirmar?' cheio':''}" onclick="finalizar()">${confirmar?`Confirmar: finalizar com ${n} de ${tot}`:tudo?'Finalizar e gerar PDF':`Finalizar com ${n} de ${tot}`}</button>`;
+}
+async function finalizar(){
+ if(done.size<SLOTS.length&&!confirmar){confirmar=true;renderFim();return}  // faltando setor: pede um segundo toque
+ confirmar=false;
+ try{const r=await fetch('/finalizar?t='+T,{method:'POST'});if(!r.ok)throw 0}catch(e){toast('Sem conexão com o PC. Tente de novo.');renderFim();return}
+ fase='finalizando';pedido=Date.now();render();
+}
+function status(){
+ if(cur)return;
+ fetch('/status?t='+T).then(r=>r.json()).then(j=>{
+  const l=j.done.slice().sort(),antes=fase;
+  fase=j.fase;pdf=j.pdf||'';erro=j.erro||'';
+  if(fase=='finalizando'&&!pedido)pedido=Date.now();
+  if(l.join()!=[...done].sort().join()||fase!=antes){done=new Set(l);render()}else renderFim();
+ }).catch(()=>renderFim());  // depois de concluido o servidor desliga: mantem a tela
+}
+function ciclo(){status();setTimeout(ciclo,fase=='finalizando'?2000:5000)}
 
 // mostra so o bloco RESPONSAVEIS da imagem da ficha
 function recortar(img){
@@ -211,7 +246,8 @@ cv.onpointermove=e=>{
 cv.onpointerup=cv.onpointercancel=()=>{if(on&&pts.length>1){const n=pts.length;x.beginPath();x.moveTo(...mid(pts[n-2],pts[n-1]));x.lineTo(...pts[n-1]);x.stroke()}on=false};
 
 async function abrir(k){
- cur=k;$('titulo').textContent=nome(k);aviso('');$('nomebox').hidden=true;
+ if(fase=='concluido'||fase=='finalizando')return;
+ confirmar=false;cur=k;$('titulo').textContent=nome(k);aviso('');$('nomebox').hidden=true;
  $('legenda').textContent=`${nome(k)}, faca ${FACA}, ${new Date().toLocaleDateString('pt-BR')}`;
  $('pad').hidden=false;document.body.style.overflow='hidden';
  try{await document.documentElement.requestFullscreen();await screen.orientation.lock('landscape')}catch(e){}  // iPhone nao deixa: aparece o aviso
@@ -249,7 +285,7 @@ async function salvar(){
  try{navigator.vibrate&&navigator.vibrate(30)}catch(e){}
  toast(`Assinatura de ${nome(k)} salva`);
 }
-render();status();setInterval(status,5000);
+render();ciclo();
 </script></html>"""
 
 QR_PAGE = """<!doctype html><html lang=pt-br><meta charset=utf-8><title>Coleta __FACA__</title>
@@ -290,10 +326,27 @@ def ip_local():
         s.close()
 
 
-def make_handler(folder, faca, token, url, slots):
+def ler(path):
+    try:
+        with open(path, encoding="cp1252") as f:  # arquivos gravados pelo VBA (ANSI)
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def make_handler(folder, faca, token, url, slots, estado):
     sigdir = os.path.join(folder, "assinaturas")
     os.makedirs(sigdir, exist_ok=True)
     keys = {s[0] for s in slots}
+
+    def status():
+        if estado.get("fase") == "concluido":  # a pasta ja pode ter sido arquivada pelo macro
+            return estado
+        done = [k for k in keys if os.path.exists(os.path.join(sigdir, k + ".png"))]
+        erro = ler(os.path.join(folder, "erro.txt"))
+        fase = "erro" if erro else "finalizando" if os.path.exists(os.path.join(folder, "finalizar.flag")) else "coletando"
+        return {"done": done, "fase": fase, "erro": erro}
+    estado["status"] = status
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -338,12 +391,23 @@ def make_handler(folder, faca, token, url, slots):
             if route.startswith("/sig/") and route[5:-4] in keys and route.endswith(".png"):
                 return self._file(os.path.join(sigdir, route[5:]), "image/png")
             if route == "/status":
-                done = [k for k in keys if os.path.exists(os.path.join(sigdir, k + ".png"))]
-                return self._send(200, json.dumps(done).encode(), "application/json")
+                s = {k: v for k, v in status().items() if k != "status"}
+                return self._send(200, json.dumps(s).encode(), "application/json")
             self._send(404)
 
         def do_POST(self):
             route = self.path.partition("?")[0]
+            if route == "/finalizar" and self._auth():  # o Excel (macro Vigiar) ve o flag e gera o PDF
+                if status()["fase"] in ("coletando", "erro"):
+                    try:
+                        os.remove(os.path.join(folder, "erro.txt"))
+                    except OSError:
+                        pass
+                    open(os.path.join(folder, "finalizar.flag"), "w").close()
+                    with open(os.path.join(folder, "log.csv"), "a", newline="", encoding="utf-8") as f:
+                        csv.writer(f).writerow([datetime.datetime.now().isoformat(timespec="seconds"),
+                                                self.client_address[0], "finalizar", "celular"])
+                return self._send(200, b"ok")
             key = route.rpartition("/")[2]
             if not (self._auth() and route.startswith("/save/") and key in keys):
                 return self._send(403)
@@ -372,17 +436,26 @@ def make_handler(folder, faca, token, url, slots):
 def main():
     folder = os.path.abspath(sys.argv[1])
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 5055
+    # o Excel pode iniciar o servidor com cwd = pasta da coleta; isso impediria o macro de arquivar (renomear) a pasta
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     faca = os.path.basename(folder)
     # [chave, titulo, esq, topo, larg, alt] - posicoes em fracao da area de impressao
     arq = os.path.join(folder, "slots.json")
     if os.path.exists(arq):
         with open(arq, encoding="cp1252") as f:  # VBA grava em ANSI
             slots = json.load(f)
-    else:  # macro antigo nao grava slots.json: usa o layout padrao da ficha
+    else:  # macro antigo nao grava slots.json: layout padrao da ficha
         slots = SLOTS_PADRAO
-    token = "".join(secrets.choice(ALFA) for _ in range(6))
+    # mesmo token ao retomar a coleta: o link que ficou aberto no celular continua valendo
+    tok_arq = os.path.join(folder, "token.txt")
+    token = ler(tok_arq)
+    if len(token) != 6 or set(token) - set(ALFA):
+        token = "".join(secrets.choice(ALFA) for _ in range(6))
+        with open(tok_arq, "w") as f:
+            f.write(token)
     url = f"http://{ip_local()}:{port}/?t={token}"
-    srv = Servidor(("0.0.0.0", port), make_handler(folder, faca, token, url, slots))
+    estado = {}
+    srv = Servidor(("0.0.0.0", port), make_handler(folder, faca, token, url, slots, estado))
     with open(os.path.join(folder, "url.txt"), "w") as f:
         f.write(url)
 
@@ -390,6 +463,10 @@ def main():
         stop = os.path.join(folder, "stop.flag")
         while not os.path.exists(stop):
             threading.Event().wait(1)
+        pdf = ler(os.path.join(folder, "pdf.txt"))
+        if pdf:  # finalizou: guarda o resultado e espera o celular ler antes de sair
+            estado.update(estado["status"](), fase="concluido", pdf=os.path.basename(pdf))
+            threading.Event().wait(8)
         srv.shutdown()
 
     threading.Thread(target=watch_stop, daemon=True).start()
